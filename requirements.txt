@@ -1,0 +1,27 @@
+# Core Requirements
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+gunicorn==21.2.0
+python-multipart>=0.0.7  # Changed from ==0.0.6 to >=0.0.7
+
+# OCR Packages
+easyocr==1.7.1
+pytesseract==0.3.10
+Pillow==10.2.0
+python-doctr==0.8.1
+pymupdf==1.23.26
+
+# AI/ML Packages (CPU versions)
+torch==2.1.0
+torchvision==0.16.0
+
+# Support Packages
+numpy==1.24.4
+opencv-python-headless==4.9.0.80
+scipy==1.11.4
+requests==2.31.0
+python-dotenv==1.0.0
+tenacity==8.2.3
+#pydantic==2.6.4
+pydantic<2.0.0
+supervisor==4.2.5
