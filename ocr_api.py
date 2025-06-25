@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 import os
 from pathlib import Path
 from config import settings
+from invoice_parser import InvoiceParser
 from ocr_engine import ocr_processor
 from ai_model import process_with_ai
 import logging
@@ -96,15 +97,17 @@ async def process_document(
     x_api_key: str = Header(...),
     engine: Optional[str] = None,
     ai_processing: Optional[bool] = True,
-    detailed: Optional[bool] = False
+    detailed: Optional[bool] = False,
+    parse_structure: Optional[bool] = False
 ):
     """
-    Enhanced document processing endpoint with:
+    Enhanced document processing endpoint now with:
     - Authentication
     - File validation
     - Engine selection
     - AI integration
     - Detailed metadata
+    - Optional structured parsing (new)
     """
     # Authentication
     if x_api_key != settings.ocr_api_key:
@@ -162,6 +165,18 @@ async def process_document(
             ai_time = time.time() - start_ai
         except Exception as e:
             logger.warning(f"AI processing failed: {str(e)}")
+
+     # NEW: Structured Data Parsing
+    structured_data = None
+    parse_time = 0
+    if parse_structure:
+        try:
+            start_parse = time.time()
+            structured_data = InvoiceParser.parse_invoice(text)
+            parse_time = time.time() - start_parse
+        except Exception as e:
+            logger.warning(f"Structured parsing failed: {str(e)}")
+            structured_data = {"error": str(e)}
     
     # Prepare response
     response_data = {
@@ -172,12 +187,23 @@ async def process_document(
             "file_read": read_time,
             "ocr_processing": ocr_time,
             "ai_processing": ai_time,
+            "structure_parsing": parse_time,  # New timing field
             "total": time.time() - start_read
         }
     }
     
     if ai_result:
         response_data["ai_result"] = ai_result
+
+    if structured_data:
+        response_data["structured_data"] = structured_data
+        # Add analysis metrics
+        if isinstance(structured_data, dict):
+            response_data["analysis"] = {
+                "field_completeness": f"{len([v for v in structured_data.values() if v])/len(structured_data)*100:.1f}%",
+                "contains_vendor": bool(structured_data.get('vendor')),
+                "contains_items": len(structured_data.get('items', [])) > 0
+            }
     
     if detailed:
         response_data["metadata"] = {
@@ -192,6 +218,8 @@ async def process_document(
     
     response = JSONResponse(content=response_data)
     response.headers["X-OCR-Engine"] = engine_used
+    if parse_structure:
+        response.headers["X-Structure-Parsed"] = "true"
     return response
 
 if __name__ == "__main__":
