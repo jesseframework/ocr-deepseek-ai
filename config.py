@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     ai_temperature: float = Field(0.1, env="AI_TEMPERATURE")
     ai_stream: bool = Field(False, env="AI_STREAM")
     ai_timeout: int = Field(120, env="AI_TIMEOUT")
+    ai_max_tokens: int = Field(2000, env="AI_MAX_TOKENS")  # Add this line
+    ai_response_format: Optional[Dict[str, str]] = Field(None, env="AI_RESPONSE_FORMAT")
+    
+
+  
     
     # Path Configuration
     model_cache_dir: str = Field(str(Path.home() / ".cache" / "ocr_models"), env="MODEL_CACHE_DIR")
@@ -43,10 +48,24 @@ class Settings(BaseSettings):
             raise ValueError("DPI must be between 72 and 600")
         return v
     
+    # Add these validators to your Settings class
+    @validator("ai_max_tokens")
+    def validate_max_tokens(cls, v):
+        if not 100 <= v <= 4000:
+            raise ValueError("Max tokens must be between 100 and 4000")
+        return v
+
+    @validator("ai_temperature")
+    def validate_temperature(cls, v):
+        if not 0.0 <= v <= 2.0:
+            raise ValueError("Temperature must be between 0.0 and 2.0")
+        return v
+    
     class Config:
         env_file = ".env"
         env_file_encoding = 'utf-8'
         case_sensitive = False
+
 
 # Initialize settings
 try:

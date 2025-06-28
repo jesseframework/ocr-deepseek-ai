@@ -1,4 +1,4 @@
-# ocr_api.py (Enhanced API Layer)
+# ocr_api.py (Enhanced with reliable AI processing)
 from fastapi import FastAPI, UploadFile, File, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,7 +20,7 @@ logger = logging.getLogger("OCRAPI")
 app = FastAPI(
     title="Enhanced OCR Pipeline API",
     description="Multi-engine OCR with AI processing and advanced features",
-    version="2.0.0",
+    version="2.1.0",  # Updated version
     docs_url="/docs",
     redoc_url=None
 )
@@ -32,7 +32,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Process-Time", "X-OCR-Engine"]
+    expose_headers=["X-Process-Time", "X-OCR-Engine", "X-Structure-Parsed", "X-AI-Processed"]
 )
 
 # Static files with cache control
@@ -86,7 +86,8 @@ async def health_check():
         "timestamp": datetime.utcnow().isoformat(),
         "config": {
             "ocr_engines": settings.ocr_engines,
-            "ai_enabled": bool(settings.ai_api_key)
+            "ai_enabled": bool(settings.ai_api_key),
+            "structured_parsing": True
         }
     }
 
@@ -101,13 +102,13 @@ async def process_document(
     parse_structure: Optional[bool] = False
 ):
     """
-    Enhanced document processing endpoint now with:
+    Enhanced document processing endpoint with:
     - Authentication
     - File validation
     - Engine selection
-    - AI integration
+    - AI integration (when enabled)
     - Detailed metadata
-    - Optional structured parsing (new)
+    - Optional structured parsing
     """
     # Authentication
     if x_api_key != settings.ocr_api_key:
@@ -154,31 +155,85 @@ async def process_document(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"OCR processing failed: {str(e)}"
         )
-    
-    # AI Processing
+
+    # Initialize result containers
     ai_result = None
     ai_time = 0
+    ai_status = "disabled"
+    ai_error = None
+    structured_data = None
+    parse_time = 0
+    analysis = {
+        "field_completeness": "0%",
+        "contains_vendor": False,
+        "contains_items": False
+    }
+
+    # AI Processing (enhanced with proper error handling)
     if ai_processing and settings.ai_api_key:
         try:
             start_ai = time.time()
-            ai_result = process_with_ai(text)
+            raw_ai_result = process_with_ai(text)
             ai_time = time.time() - start_ai
-        except Exception as e:
-            logger.warning(f"AI processing failed: {str(e)}")
 
-     # NEW: Structured Data Parsing
-    structured_data = None
-    parse_time = 0
+            if "error" in raw_ai_result:
+                ai_status = "failed"
+                logger.error(f"AI processing failed: {raw_ai_result['error']}")
+                ai_result = {
+                    "error": raw_ai_result["error"],
+                    "type": "ai_processing_error",
+                    "suggestion": raw_ai_result.get("suggestion", "Check your API configuration"),
+                    "original_prompt": raw_ai_result.get("original_prompt", None)
+                }
+            else:
+                ai_status = "success"
+                ai_result = raw_ai_result
+                logger.info(f"AI processing completed in {ai_time:.2f}s")
+                
+        except Exception as e:
+            ai_status = "error"
+            ai_result = {
+                "error": str(e),
+                "type": "unexpected_error",
+                "suggestion": "Check the API connection and configuration"
+            }
+            logger.error(f"AI processing critical error: {str(e)}", exc_info=True)
+
+    # Structured Data Parsing
     if parse_structure:
         try:
             start_parse = time.time()
             structured_data = InvoiceParser.parse_invoice(text)
             parse_time = time.time() - start_parse
+            
+            if isinstance(structured_data, dict):
+                if "error" in structured_data:
+                    analysis.update({
+                        "error": structured_data.get("error"),
+                        "field_completeness": "0%",
+                        "contains_vendor": False,
+                        "contains_items": False
+                    })
+                else:
+                    analysis.update({
+                        "field_completeness": structured_data.get("_completeness", "0%"),
+                        "contains_vendor": bool(structured_data.get("vendor", {}).get("name")),
+                        "contains_items": len(structured_data.get("items", [])) > 0
+                    })
         except Exception as e:
-            logger.warning(f"Structured parsing failed: {str(e)}")
-            structured_data = {"error": str(e)}
-    
-    # Prepare response
+            logger.error(f"Structured parsing failed: {str(e)}")
+            structured_data = {
+                "error": f"Parsing error: {str(e)}",
+                "original_text_sample": text[:200] + "..." if text else None
+            }
+            analysis.update({
+                "error": "Parsing failed",
+                "field_completeness": "0%",
+                "contains_vendor": False,
+                "contains_items": False
+            })
+
+    # Prepare comprehensive response
     response_data = {
         "status": "success",
         "engine_used": engine_used,
@@ -187,24 +242,24 @@ async def process_document(
             "file_read": read_time,
             "ocr_processing": ocr_time,
             "ai_processing": ai_time,
-            "structure_parsing": parse_time,  # New timing field
+            "structure_parsing": parse_time,
             "total": time.time() - start_read
         }
     }
-    
-    if ai_result:
-        response_data["ai_result"] = ai_result
 
-    if structured_data:
+    # Include AI results if processing was attempted
+    if ai_processing:
+        if ai_result:
+            response_data["ai_result"] = ai_result
+        if ai_error:
+            response_data["ai_error"] = ai_error
+
+    # Include structured data if requested
+    if parse_structure:
         response_data["structured_data"] = structured_data
-        # Add analysis metrics
-        if isinstance(structured_data, dict):
-            response_data["analysis"] = {
-                "field_completeness": f"{len([v for v in structured_data.values() if v])/len(structured_data)*100:.1f}%",
-                "contains_vendor": bool(structured_data.get('vendor')),
-                "contains_items": len(structured_data.get('items', [])) > 0
-            }
-    
+        response_data["analysis"] = analysis
+
+    # Add detailed metadata if requested
     if detailed:
         response_data["metadata"] = {
             "filename": file.filename,
@@ -213,13 +268,23 @@ async def process_document(
             "ocr_engine_config": {
                 "default_engine": settings.default_ocr_engine,
                 "available_engines": [k for k, v in settings.ocr_engines.items() if v]
+            },
+            "processing_capabilities": {
+                "ai_processing": bool(settings.ai_api_key),
+                "ai_model": settings.ai_model_name if settings.ai_api_key else None,
+                "structure_parsing": True,
+                "parser_version": "2.1"
             }
         }
-    
+
+    # Set response headers
     response = JSONResponse(content=response_data)
     response.headers["X-OCR-Engine"] = engine_used
     if parse_structure:
         response.headers["X-Structure-Parsed"] = "true"
+    if ai_processing and settings.ai_api_key:
+        response.headers["X-AI-Processed"] = "true" if not ai_error else "false"
+    
     return response
 
 if __name__ == "__main__":

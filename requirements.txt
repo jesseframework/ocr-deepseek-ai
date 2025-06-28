@@ -7,7 +7,7 @@ python-multipart>=0.0.7  # Changed from ==0.0.6 to >=0.0.7
 # OCR Packages
 easyocr==1.7.1
 pytesseract==0.3.10
-Pillow==10.2.0
+Pillow>=10.2.0
 python-doctr==0.8.1
 pymupdf==1.23.26
 
