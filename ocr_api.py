@@ -9,11 +9,14 @@ import os
 from pathlib import Path
 from config import settings
 from invoice_parser import InvoiceParser
+from dynamic_invoice_parser import DynamicInvoiceParser
 from ocr_engine import ocr_processor
 from ai_model import process_with_ai
 import logging
 import time
 from datetime import datetime
+from parsers.adaptive_invoice_parser import AdaptiveInvoiceParser
+
 
 logger = logging.getLogger("OCRAPI")
 
@@ -203,9 +206,56 @@ async def process_document(
     if parse_structure:
         try:
             start_parse = time.time()
-            structured_data = InvoiceParser.parse_invoice(text)
+            # parser = DynamicInvoiceParser()
+            # structured_data = parser.parse(text)
+
+            try:
+                start_parse = time.time()
+                adaptive_parser = AdaptiveInvoiceParser()
+                structured_data = adaptive_parser.parse(text)
+                parse_time = time.time() - start_parse
+
+                if isinstance(structured_data, dict):
+                    if "error" in structured_data:
+                        analysis.update({
+                            "error": structured_data.get("error"),
+                            "field_completeness": "0%",
+                            "contains_vendor": False,
+                            "contains_items": False
+                        })
+                    else:
+                        analysis.update({
+                            "field_completeness": structured_data.get("_completeness", "0%"),
+                            "contains_vendor": bool(structured_data.get("vendor", {}).get("name")),
+                            "contains_items": len(structured_data.get("items", [])) > 0
+                        })
+
+                # Optional fallback: Dynamic parser if low confidence
+                if structured_data.get("_confidence_score", 0) < 0.6:
+                    logger.info("Low confidence from AdaptiveParser. Falling back to DynamicInvoiceParser.")
+                    structured_data.update({
+                        "_parser_fallback_used": True
+                    })
+                    fallback_data = DynamicInvoiceParser().parse(text)
+                    structured_data.update(fallback_data)
+                    analysis["fallback_parser"] = "DynamicInvoiceParser"
+
+            except Exception as e:
+                logger.error(f"Structured parsing failed: {str(e)}")
+                structured_data = {
+                    "error": f"Parsing error: {str(e)}",
+                    "original_text_sample": text[:200] + "..." if text else None
+                }
+                analysis.update({
+                    "error": "Parsing failed",
+                    "field_completeness": "0%",
+                    "contains_vendor": False,
+                    "contains_items": False
+                })
+
+
             parse_time = time.time() - start_parse
-            
+
             if isinstance(structured_data, dict):
                 if "error" in structured_data:
                     analysis.update({
@@ -220,6 +270,12 @@ async def process_document(
                         "contains_vendor": bool(structured_data.get("vendor", {}).get("name")),
                         "contains_items": len(structured_data.get("items", [])) > 0
                     })
+
+            # Optional fallback: AI if confidence is too low
+            if structured_data.get("_fallback_needed") and ai_processing and settings.ai_api_key:
+                logger.info("Low confidence detected. Fallback to AI enabled.")
+                structured_data = process_with_ai(text)
+
         except Exception as e:
             logger.error(f"Structured parsing failed: {str(e)}")
             structured_data = {
@@ -232,6 +288,7 @@ async def process_document(
                 "contains_vendor": False,
                 "contains_items": False
             })
+
 
     # Prepare comprehensive response
     response_data = {
