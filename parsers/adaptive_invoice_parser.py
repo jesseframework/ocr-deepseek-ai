@@ -17,6 +17,10 @@ class InvoiceTemplate:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     last_used: str = field(default_factory=lambda: datetime.now().isoformat())
     usage_count: int = 1
+    fields: Dict[str, Any] = field(default_factory=dict)  # e.g. invoice_number, due_date, etc.
+    vendor_details: Dict[str, str] = field(default_factory=dict)  # name, address, phone, email
+    customer_details: Dict[str, str] = field(default_factory=dict)  # name, email
+    metadata: Dict[str, Any] = field(default_factory=dict)  # e.g. currency, tax, subtotal, etc.
 
 class AdaptiveInvoiceParser:
     def __init__(self, db_path: str = "invoice_templates.db"):
@@ -35,7 +39,11 @@ class AdaptiveInvoiceParser:
                     item_pattern TEXT,
                     created_at TEXT,
                     last_used TEXT,
-                    usage_count INTEGER
+                    usage_count INTEGER,
+                    fields TEXT,
+                    vendor_details TEXT,
+                    customer_details TEXT,
+                    metadata TEXT
                 )
             """)
 
@@ -68,7 +76,11 @@ class AdaptiveInvoiceParser:
                     item_pattern=json.loads(row[4]),
                     created_at=row[5],
                     last_used=row[6],
-                    usage_count=row[7]
+                    usage_count=row[7],
+                    fields=json.loads(row[8]) if row[8] else {},
+                    vendor_details=json.loads(row[9]) if row[9] else {},
+                    customer_details=json.loads(row[10]) if row[10] else {},
+                    metadata=json.loads(row[11]) if row[11] else {}
                 )
         return None
 
@@ -85,8 +97,12 @@ class AdaptiveInvoiceParser:
                     item_pattern,
                     created_at,
                     last_used,
-                    usage_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    usage_count,
+                    fields,
+                    vendor_details,
+                    customer_details,
+                    metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     template.template_id,
@@ -96,7 +112,11 @@ class AdaptiveInvoiceParser:
                     json.dumps(template.item_pattern),
                     template.created_at,
                     template.last_used,
-                    template.usage_count
+                    template.usage_count,
+                    json.dumps(template.fields),
+                    json.dumps(template.vendor_details),
+                    json.dumps(template.customer_details),
+                    json.dumps(template.metadata)
                 )
             )
 
@@ -189,7 +209,25 @@ class AdaptiveInvoiceParser:
         # Update template usage
         template.last_used = datetime.now().isoformat()
         template.usage_count += 1
+        template.fields = {
+            'invoice_number': result.get('invoice_number'),
+            'issue_date': result.get('issue_date'),
+            'due_date': result.get('due_date'),
+            'amount_due': result.get('amount_due'),
+            'po_number': result.get('po_number'),
+            'subtotal': result.get('subtotal'),
+            'tax': result.get('tax')
+        }
+        template.vendor_details = result.get('vendor', {})
+        template.customer_details = result.get('customer', {})
+        template.metadata = {
+            'currency': result.get('currency'),
+            'item_count': len(result.get('items', [])),
+            'confidence_score': result.get('_confidence_score'),
+            'completeness': result.get('_completeness')
+        }
         self._save_template(template)
+        
         
         return result
 

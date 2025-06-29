@@ -16,6 +16,7 @@ import logging
 import time
 from datetime import datetime
 from parsers.adaptive_invoice_parser import AdaptiveInvoiceParser
+from template_routes import router as template_router
 
 
 logger = logging.getLogger("OCRAPI")
@@ -40,7 +41,7 @@ app.add_middleware(
 
 # Static files with cache control
 app.mount("/static", StaticFiles(directory=settings.static_files_dir), name="static")
-
+app.include_router(template_router)
 @app.on_event("startup")
 async def startup_event():
     """Enhanced startup with health checks"""

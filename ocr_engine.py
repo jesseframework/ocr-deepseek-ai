@@ -151,6 +151,43 @@ class OCRProcessor:
             logger.error(f"Doctr processing failed: {str(e)}")
             raise
 
+    # def _easyocr_process(self, file_bytes: bytes, filename: str) -> Tuple[str, str]:
+    #     """Optimized EasyOCR processing"""
+    #     if not settings.ocr_engines.get("easyocr", True):
+    #         raise ValueError("EasyOCR engine is disabled")
+    #     if not self.easyocr_reader:
+    #         raise Exception("EasyOCR not initialized")
+        
+    #     try:
+    #         if filename.lower().endswith(".pdf"):
+    #             images = self._rasterize_pdf(io.BytesIO(file_bytes))
+    #             results = []
+    #             for img_bytes in images:
+    #                 img_array = np.frombuffer(img_bytes, np.uint8)
+    #                 result = self.easyocr_reader.readtext(
+    #                     img_array, 
+    #                     detail=0, 
+    #                     paragraph=True,
+    #                     batch_size=4,
+    #                     workers=0
+    #                 )
+    #                 results.append("\n".join(result))
+    #             text = "\n".join(results)
+    #         else:
+    #             result = self.easyocr_reader.readtext(
+    #                 file_bytes, 
+    #                 detail=0, 
+    #                 paragraph=True,
+    #                 batch_size=4,
+    #                 workers=0
+    #             )
+    #             text = "\n".join(result)
+            
+    #         return text, "easyocr"
+    #     except Exception as e:
+    #         logger.error(f"EasyOCR processing failed: {str(e)}")
+    #         raise
+
     def _easyocr_process(self, file_bytes: bytes, filename: str) -> Tuple[str, str]:
         """Optimized EasyOCR processing"""
         if not settings.ocr_engines.get("easyocr", True):
@@ -163,9 +200,10 @@ class OCRProcessor:
                 images = self._rasterize_pdf(io.BytesIO(file_bytes))
                 results = []
                 for img_bytes in images:
-                    img_array = np.frombuffer(img_bytes, np.uint8)
+                    pil_image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                    img_np = np.array(pil_image)
                     result = self.easyocr_reader.readtext(
-                        img_array, 
+                        img_np, 
                         detail=0, 
                         paragraph=True,
                         batch_size=4,
@@ -174,9 +212,11 @@ class OCRProcessor:
                     results.append("\n".join(result))
                 text = "\n".join(results)
             else:
+                pil_image = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+                img_np = np.array(pil_image)
                 result = self.easyocr_reader.readtext(
-                    file_bytes, 
-                    detail=0, 
+                    img_np,
+                    detail=0,
                     paragraph=True,
                     batch_size=4,
                     workers=0
@@ -184,6 +224,7 @@ class OCRProcessor:
                 text = "\n".join(result)
             
             return text, "easyocr"
+
         except Exception as e:
             logger.error(f"EasyOCR processing failed: {str(e)}")
             raise
